@@ -66,9 +66,9 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     <canvas id="cv"></canvas>
     <div class="status" id="status">Загрузка геометрического ядра…</div>
     <div class="legend">
-      <span><i style="background:#8d949c"></i>ЛС59-1</span>
-      <span><i style="background:#6f767e"></i>резьба</span>
-      <span><i style="background:#b4533c"></i>сечение</span>
+      <span><i style="background:#c3c8ce"></i>ЛС59-1</span>
+      <span><i style="background:#9aa0a7"></i>резьба</span>
+      <span><i style="background:#3d4248;outline:1px solid var(--muted)"></i>сечение</span>
     </div>
   </div>
   <aside>
@@ -247,13 +247,14 @@ try {
   const rim = new THREE.DirectionalLight(0xdfe8ff, 0.6); rim.position.set(-250, -80, -100); camera.add(rim);
   scene.add(camera);
 
-  // Серый глянец: неметаллическая основа под прозрачным лаковым слоем
-  const metal = new THREE.MeshPhysicalMaterial({ color: 0x8d949c, metalness: 0, roughness: 0.4,
-    clearcoat: 0.7, clearcoatRoughness: 0.12, envMapIntensity: 0.6, side: THREE.DoubleSide });
-  // Резьба: темнее и матовая, без лака — витки читаются светотенью, а не тонут в отражениях
-  const threadMat = new THREE.MeshStandardMaterial({ color: 0x7c838b, metalness: 0, roughness: 0.62,
-    envMapIntensity: 0.35, side: THREE.DoubleSide });
-  const cutMat = new THREE.MeshStandardMaterial({ color: 0xb4533c, metalness: 0.15, roughness: 0.6, side: THREE.DoubleSide,
+  // Металл: шлифованная сталь, отражает окружение
+  const metal = new THREE.MeshStandardMaterial({ color: 0xc3c8ce, metalness: 1, roughness: 0.28,
+    envMapIntensity: 1.0, side: THREE.DoubleSide });
+  // Резьба: тот же металл, но темнее и шероховатее — витки читаются, а не тонут в бликах
+  const threadMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a7, metalness: 1, roughness: 0.55,
+    envMapIntensity: 0.7, side: THREE.DoubleSide });
+  // Сечение: тёмно-серое матовое
+  const cutMat = new THREE.MeshStandardMaterial({ color: 0x3d4248, metalness: 0, roughness: 0.85, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   const mats = [metal, threadMat, cutMat];
   const edgeMat = new THREE.LineBasicMaterial({ color: 0x23282d, transparent: true, opacity: 0.55 });
