@@ -67,6 +67,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
     <div class="status" id="status">Загрузка геометрического ядра…</div>
     <div class="legend">
       <span><i style="background:#8d949c"></i>ЛС59-1</span>
+      <span><i style="background:#6f767e"></i>резьба</span>
       <span><i style="background:#b4533c"></i>сечение</span>
     </div>
   </div>
@@ -247,11 +248,14 @@ try {
   scene.add(camera);
 
   // Серый глянец: неметаллическая основа под прозрачным лаковым слоем
-  const metal = new THREE.MeshPhysicalMaterial({ color: 0x8d949c, metalness: 0, roughness: 0.32,
-    clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 0.9, side: THREE.DoubleSide });
+  const metal = new THREE.MeshPhysicalMaterial({ color: 0x8d949c, metalness: 0, roughness: 0.4,
+    clearcoat: 0.7, clearcoatRoughness: 0.12, envMapIntensity: 0.6, side: THREE.DoubleSide });
+  // Резьба: темнее и матовая, без лака — витки читаются светотенью, а не тонут в отражениях
+  const threadMat = new THREE.MeshStandardMaterial({ color: 0x7c838b, metalness: 0, roughness: 0.62,
+    envMapIntensity: 0.35, side: THREE.DoubleSide });
   const cutMat = new THREE.MeshStandardMaterial({ color: 0xb4533c, metalness: 0.15, roughness: 0.6, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-  const mats = [metal, metal, cutMat];
+  const mats = [metal, threadMat, cutMat];
   const edgeMat = new THREE.LineBasicMaterial({ color: 0x23282d, transparent: true, opacity: 0.55 });
 
   const rot = new THREE.Group();          // поворот ползунками
@@ -360,9 +364,48 @@ try {
     return { geo, plain, nTri };
   }
 
+  // Винтовые линии по вершинам витков — по одной на шаг, как резьба читается на чертеже и в CAD.
+  // Строятся аналитически по той же фазе, что и screw(): при извлечении с закруткой −360°·L/P
+  // вершина профиля (u = 0) на высоте h повёрнута на φ = −2πh/P. Вершина внутренней резьбы — впадина
+  // винта-пустоты (u = 0,5). Линии строятся один раз, при разрезах их отсекают плоскости видеокарты.
+  renderer.localClippingEnabled = true;
+  const threadLineMat = new THREE.LineBasicMaterial({ color: 0x23282e, transparent: true, opacity: 0.85, clippingPlanes: [] });
+  const boreR = x => x < 30 ? 22.5 : x < 60 ? 11.25 : x < 90 ? 16.5 : x < 94 ? 17.7 : x < 102 ? 17 : x < 130 ? 24 : 22.5;
+  const linePts = [];
+  function helix(P, h0, h1, phase, r, place, keep = () => true) {
+    const N = Math.ceil((h1 - h0) / P * 72);
+    let prev = null;
+    for (let i = 0; i <= N; i++) {
+      const h = h0 + (h1 - h0) * i / N, phi = -2 * Math.PI * h / P + phase;
+      const p = place(h, r * Math.cos(phi), r * Math.sin(phi));
+      const ok = keep(p);
+      if (ok && prev) linePts.push(...prev, ...p);
+      prev = ok ? p : null;
+    }
+  }
+  const onX = x0 => (h, c, s) => [x0 + h, s, -c];                 // alongX: (lx, ly, lz) → (x0 + lz, ly, −lx)
+  const onY = (x, z) => (h, c, s) => [x + c, h, z - s];            // alongY: (lx, ly, lz) → (x + lx, lz, z − ly)
+  // Отступ линии от вершины витка. Между слоями извлечения поверхность идёт хордами и проседает
+  // к оси: снаружи это не мешает (линия над хордой), а во внутренней резьбе хорда выходит
+  // в пустоту на ~0,3 мм — линию нужно вынести дальше, иначе её закрывает поверхность.
+  const dOut = 0.04, dIn = 0.45;
+  helix(2, 1, 20, 0, 28 + dOut, onX(0));                           // M56×2 (после фаски)
+  helix(1.5, 0.5, 10.5, 0, 26 + dOut, onX(138.5));                 // M52×1,5 (до фаски)
+  helix(1, 0.3, 7.6, Math.PI, 17.5 - 0.5413 - dIn, onX(93.8));     // M35×1
+  for (const [x, z] of [[73, 6], [115, -13]]) {                    // M27×1,5 — до фаски и до выхода в расточку
+    helix(1.5, 0.5, 36, Math.PI, 13.5 - 0.812 - dIn, onY(x, z),
+      p => Math.hypot(p[1], p[2]) > boreR(p[0]) + 0.3);
+  }
+  const tlg = new THREE.BufferGeometry();
+  tlg.setAttribute('position', new THREE.Float32BufferAttribute(linePts, 3));
+  const threadLines = new THREE.LineSegments(tlg, threadLineMat);
+  offs.add(threadLines);
+  let localClip = [];                     // плоскости в координатах детали; в мировые переводятся каждый кадр
+
   function rebuild() {
     let m = part;
     const planes = [];
+    localClip = [];
     for (const k of ['x', 'y', 'z']) {
       if (!$('c' + k).checked) continue;
       const value = +$('p' + k).value + EPS;
@@ -371,6 +414,8 @@ try {
       if (m !== part) m.delete();
       m = next;
       planes.push({ axis: AX[k], value, out: flip[k] });
+      const nv = new THREE.Vector3().fromArray(n);
+      localClip.push(new THREE.Plane(nv, flip[k] * value));       // видимая сторона — куда смотрит нормаль
     }
     const { geo, plain, nTri } = toGeometry(m, planes);
     if (m !== part) m.delete();
@@ -421,7 +466,10 @@ try {
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     });
   }
-  $('edges').addEventListener('change', e => { if (edges) edges.visible = e.target.checked; });
+  $('edges').addEventListener('change', e => {
+    if (edges) edges.visible = e.target.checked;
+    threadLines.visible = e.target.checked;
+  });
   $('axes').addEventListener('change', e => axes.visible = e.target.checked);
   axes.visible = $('axes').checked;
   syncLabels();
@@ -444,6 +492,8 @@ try {
       let v = +$('ry').value + 0.4; if (v > 180) v -= 360; $('ry').value = v; syncLabels();
     }
     rot.rotation.set(deg(+$('rx').value), deg(+$('ry').value), 0, 'XYZ');
+    rot.updateMatrixWorld(true);
+    threadLineMat.clippingPlanes = localClip.map(p => p.clone().applyMatrix4(offs.matrixWorld));
     controls.update();
     renderer.render(scene, camera);
     requestAnimationFrame(loop);
